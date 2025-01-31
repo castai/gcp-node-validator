@@ -1,8 +1,14 @@
-module github.com/castai/gcp-node-validator
+module github.com/castai/gcp-node-validator/container
 
-go 1.22.6
+go 1.23
 
-require cloud.google.com/go/compute v1.31.1
+toolchain go1.23.5
+
+require (
+	cloud.google.com/go/compute v1.31.1
+	github.com/cenkalti/backoff/v5 v5.0.1
+	github.com/sirupsen/logrus v1.9.3
+)
 
 require (
 	cloud.google.com/go/auth v0.14.0 // indirect

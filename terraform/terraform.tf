@@ -63,6 +63,10 @@ resource "google_cloud_run_v2_service" "default" {
   template {
     containers {
       image = var.validator_image
+      env {
+        name = "PROJECT_ID"
+        value = data.google_project.project.project_id
+      }
     }
     service_account = google_service_account.main.email
   }
