@@ -48,8 +48,8 @@ resource "google_project_iam_member" "runinvoker" {
 # Grant permission to act on Compute Engine resources
 resource "google_project_iam_member" "compute_admin" {
   project = data.google_project.project.id
-  # TODO: user custom role with get and delete instance permission
-  role   = "roles/compute.viewer"
+  # TODO: user custom role with get and delete instance permissions
+  role   = "roles/compute.admin"
   member = "serviceAccount:${google_service_account.main.email}"
 }
 
@@ -64,7 +64,7 @@ resource "google_cloud_run_v2_service" "default" {
     containers {
       image = var.validator_image
       env {
-        name = "PROJECT_ID"
+        name  = "PROJECT_ID"
         value = data.google_project.project.project_id
       }
     }

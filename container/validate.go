@@ -29,14 +29,31 @@ type AuditLog struct {
 		ResourceName string `json:"resourceName"`
 	} `json:"protoPayload"`
 	Resource struct {
-		Type string `json:"type"`
+		Type   string `json:"type"`
+		Labels struct {
+			ProjectID string `json:"project_id"`
+		} `json:"labels"`
 	} `json:"resource"`
 }
 
 // TODO: Implement instance validation logic
-func (h *Handler) validateInstance(compute *computepb.Instance) bool {
-	fmt.Printf("%+v\n", compute)
+func (h *Handler) validateInstance(_ *computepb.Instance) bool {
 	return true
+}
+
+func (h *Handler) deleteInstance(ctx context.Context, project, zone, name string) error {
+	req := &computepb.DeleteInstanceRequest{
+		Project:  project,
+		Zone:     zone,
+		Instance: name,
+	}
+
+	_, err := h.computeClient.Delete(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +91,7 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		log.Infof("request processed")
 	}()
 
-	instanceReq := getInstanceRequestFromResourceName(logEntry.ProtoPayload.ResourceName)
+	instanceReq := getInstanceRequestFromResourceName(&logEntry)
 	if instanceReq == nil {
 		log.Errorf("failed to get instance request from resource name")
 		http.Error(w, "Invalid request", http.StatusBadRequest)
@@ -112,17 +129,27 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, found := instance.Labels["cast-managed-by"]; !found {
+		log.Infof("Instance %s is not managed by CAST", *instance.Name)
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("OK")); err != nil {
+			log.WithError(err).Errorf("failed to write response")
+			return
+		}
+		return
+	}
+
 	valid := h.validateInstance(instance)
 
 	if valid {
 		log.Printf("Instance %s is valid", *instance.Name)
 	} else {
 		log.Printf("Instance %s is invalid", *instance.Name)
-		//if err := deleteInstance(instanceName, project, zone); err != nil {
-		//	log.Printf("Failed to delete instance: %v", err)
-		//	http.Error(w, "Failed to delete instance", http.StatusInternalServerError)
-		//	return
-		//}
+		if err := h.deleteInstance(ctx, instanceReq.Project, instanceReq.Zone, instanceReq.Instance); err != nil {
+			log.Printf("Failed to delete instance: %v", err)
+			http.Error(w, "Failed to delete instance", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -132,12 +159,12 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getInstanceRequestFromResourceName(resourceName string) *computepb.GetInstanceRequest {
-	parts := strings.Split(resourceName, "/")
+func getInstanceRequestFromResourceName(log *AuditLog) *computepb.GetInstanceRequest {
+	parts := strings.Split(log.ProtoPayload.ResourceName, "/")
 	if len(parts) != 6 {
 		return nil
 	}
-	project := parts[1]
+	project := log.Resource.Labels.ProjectID
 	zone := parts[3]
 	instanceName := parts[5]
 
