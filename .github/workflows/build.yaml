@@ -58,6 +58,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
-          push: ${{ github.ref == 'refs/heads/main' }}
+          push: ${{ github.event_name == 'release' }}
           tags: |
             ghcr.io/castai/node-validator:${{ env.RELEASE_TAG }}
