@@ -6,13 +6,13 @@ WORKDIR /app
 
 # Copy go modules and download dependencies
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 # Copy the source code
 COPY . .
 
 # Build the Go application
-RUN go build -o server .
+RUN --mount=type=cache,target=/root/.cache/go-build go build -o server .
 
 # Use a minimal image for running the application
 FROM gcr.io/distroless/base-debian12
