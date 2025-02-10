@@ -6,20 +6,36 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"slices"
 	"strings"
 	"time"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
+	"github.com/castai/gcp-node-validator/container/validate"
 	"github.com/cenkalti/backoff/v5"
+	"github.com/kelseyhightower/envconfig"
 	"github.com/sirupsen/logrus"
 )
+
+type Config struct {
+	LogLevel      string `default:"info"`
+	ProjectID     string `required:"true"`
+	DeleteInvalid bool   `default:"false"`
+	Port          int    `default:"8080"`
+
+	ClusterIDs []string `required:"false"`
+}
 
 type Handler struct {
 	logger        logrus.FieldLogger
 	projectID     string
 	computeClient *compute.InstancesClient
+
+	clusterIDs    []string
+	deleteInvalid bool
+
+	validator *validate.InstanceValidator
 }
 
 type AuditLog struct {
@@ -36,26 +52,6 @@ type AuditLog struct {
 	} `json:"resource"`
 }
 
-// TODO: Implement instance validation logic
-func (h *Handler) validateInstance(_ *computepb.Instance) bool {
-	return true
-}
-
-func (h *Handler) deleteInstance(ctx context.Context, project, zone, name string) error {
-	req := &computepb.DeleteInstanceRequest{
-		Project:  project,
-		Zone:     zone,
-		Instance: name,
-	}
-
-	_, err := h.computeClient.Delete(ctx, req)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -68,7 +64,7 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("Payload: %s\n", string(payload))
+	h.logger.WithField("payload", string(payload)).Debug("received audit log")
 
 	if err := json.Unmarshal(payload, &logEntry); err != nil {
 		h.logger.WithError(err).Errorf("failed to unmarshal payload")
@@ -86,7 +82,6 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log := h.logger.WithField("resourceName", logEntry.ProtoPayload.ResourceName)
-
 	defer func() {
 		log.Infof("request processed")
 	}()
@@ -129,8 +124,7 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, found := instance.Labels["cast-managed-by"]; !found {
-		log.Infof("Instance %s is not managed by CAST", *instance.Name)
+	if !h.considerInstance(instance, log) {
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write([]byte("OK")); err != nil {
 			log.WithError(err).Errorf("failed to write response")
@@ -142,13 +136,12 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 	valid := h.validateInstance(instance)
 
 	if valid {
-		log.Printf("Instance %s is valid", *instance.Name)
+		log.Info("instance is valid")
 	} else {
-		log.Printf("Instance %s is invalid", *instance.Name)
-		if err := h.deleteInstance(ctx, instanceReq.Project, instanceReq.Zone, instanceReq.Instance); err != nil {
-			log.Printf("Failed to delete instance: %v", err)
-			http.Error(w, "Failed to delete instance", http.StatusInternalServerError)
-			return
+		log.Info("instance is invalid")
+		if err := h.handleInvalidInstance(ctx, log, instanceReq.Project, instanceReq.Zone, instanceReq.Instance); err != nil {
+			log.WithError(err).Errorf("failed to handle invalid instance")
+			http.Error(w, "Failed to handle invalid instance", http.StatusInternalServerError)
 		}
 	}
 
@@ -157,6 +150,65 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		log.WithError(err).Errorf("failed to write response")
 		return
 	}
+}
+
+func (h *Handler) considerInstance(instance *computepb.Instance, log *logrus.Entry) bool {
+	if _, found := instance.Labels["cast-managed-by"]; !found {
+		log.Info("instance is not managed by CAST, skip instance")
+		return false
+	}
+
+	if len(h.clusterIDs) > 0 {
+		clusterID, found := instance.Labels["cast-cluster-id"]
+
+		if !found {
+			log.Info("missing CAST cluster id, skip instance")
+			return false
+
+		}
+
+		if !slices.Contains(h.clusterIDs, clusterID) {
+			log.Info("instance not part of monitored clusters, skip instance")
+			return false
+		}
+	}
+
+	return true
+}
+
+func (h *Handler) validateInstance(i *computepb.Instance) bool {
+	if err := h.validator.Validate(i); err != nil {
+		h.logger.WithError(err).Errorf("instance validation failed")
+		fmt.Println(err.Error())
+		return false
+	}
+	return true
+}
+
+func (h *Handler) handleInvalidInstance(ctx context.Context, log *logrus.Entry, project, zone, name string) error {
+	if h.deleteInvalid {
+		if err := h.deleteInstance(ctx, project, zone, name); err != nil {
+			return fmt.Errorf("failed to delete instance: %w", err)
+		}
+		log.Info("instance deleted")
+	}
+
+	return nil
+}
+
+func (h *Handler) deleteInstance(ctx context.Context, project, zone, name string) error {
+	req := &computepb.DeleteInstanceRequest{
+		Project:  project,
+		Zone:     zone,
+		Instance: name,
+	}
+
+	_, err := h.computeClient.Delete(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func getInstanceRequestFromResourceName(log *AuditLog) *computepb.GetInstanceRequest {
@@ -179,6 +231,19 @@ func main() {
 	ctx := context.Background()
 	log := logrus.New()
 
+	cfg := &Config{}
+
+	if err := envconfig.Process("APP", cfg); err != nil {
+		log.WithError(err).Fatal("failed to process config")
+	}
+
+	logLevel, err := logrus.ParseLevel(cfg.LogLevel)
+	if err != nil {
+		log.Warnf("invalid log level %s, defaulting to info", cfg.LogLevel)
+		logLevel = logrus.InfoLevel
+	}
+	log.SetLevel(logLevel)
+
 	computeClient, err := compute.NewInstancesRESTClient(ctx)
 	if err != nil {
 		log.Fatalf("failed to create compute client: %v", err)
@@ -187,14 +252,15 @@ func main() {
 	handler := &Handler{
 		logger:        log,
 		computeClient: computeClient,
-		projectID:     os.Getenv("PROJECT_ID"),
+		projectID:     cfg.ProjectID,
+
+		clusterIDs:    cfg.ClusterIDs,
+		deleteInvalid: cfg.DeleteInvalid,
+
+		validator: validate.NewInstanceValidator(),
 	}
 
 	http.HandleFunc("/", handler.handleAuditLog)
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-	log.Printf("Server listening on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.WithField("port", cfg.Port).Infof("listening for requests")
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), nil))
 }

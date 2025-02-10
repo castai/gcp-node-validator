@@ -1,18 +1,3 @@
-variable "project" {
-  description = "The project ID to deploy resources to"
-}
-
-variable "region" {
-  description = "The region to deploy resources to"
-}
-
-variable "name_prefix" {
-  description = "A prefix to add to resource names"
-}
-
-variable "validator_image" {
-  description = "The image to use for the validator Cloud Run service"
-}
 
 terraform {
   required_providers {
@@ -45,12 +30,21 @@ resource "google_project_iam_member" "runinvoker" {
   member  = "serviceAccount:${google_service_account.main.email}"
 }
 
+resource "google_project_iam_custom_role" "instance_validator" {
+  role_id     = "${var.name_prefix}CastInstanceValidator"
+  title       = "CAST AI Instance Validator"
+  description = "Custom role to validate CAST AI instances"
+  permissions = [
+    "compute.instances.get",
+    "compute.instances.delete"
+  ]
+}
+
 # Grant permission to act on Compute Engine resources
 resource "google_project_iam_member" "compute_admin" {
   project = data.google_project.project.id
-  # TODO: user custom role with get and delete instance permissions
-  role   = "roles/compute.admin"
-  member = "serviceAccount:${google_service_account.main.email}"
+  role    = google_project_iam_custom_role.instance_validator.id
+  member  = "serviceAccount:${google_service_account.main.email}"
 }
 
 # Deploy Cloud Run service
@@ -64,7 +58,7 @@ resource "google_cloud_run_v2_service" "default" {
     containers {
       image = var.validator_image
       env {
-        name  = "PROJECT_ID"
+        name  = "APP_PROJECTID"
         value = data.google_project.project.project_id
       }
     }
@@ -102,5 +96,30 @@ resource "google_eventarc_trigger" "instance_insert" {
   }
 
   service_account = google_service_account.main.email
+}
+
+resource "google_monitoring_alert_policy" "invalid_instances" {
+  display_name = "Invalid CAST Instance Alert Policy"
+  combiner     = "OR"
+
+  severity              = var.alert_severity
+  notification_channels = var.alert_notification_channels
+
+  alert_strategy {
+    notification_rate_limit {
+      period = "300s"
+    }
+  }
+
+  conditions {
+    display_name = "Invalid instance log"
+    condition_matched_log {
+      filter = <<EOF
+resource.type = cloud_run_revision
+  AND resource.labels.service_name = ${google_cloud_run_v2_service.default.name}
+  AND "instance is invalid"
+EOF
+    }
+  }
 }
 
