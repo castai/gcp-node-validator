@@ -16,6 +16,13 @@ resource "google_service_account" "main" {
   account_id = "${var.name_prefix}-vm-validator-sa"
 }
 
+resource "google_storage_bucket" "main" {
+  name                     = "${var.name_prefix}-vm-validator"
+  location                 = "US"
+  force_destroy            = true
+  public_access_prevention = "enforced"
+}
+
 # Grant permission to receive Eventarc events
 resource "google_project_iam_member" "eventreceiver" {
   project = data.google_project.project.id
@@ -65,7 +72,6 @@ resource "google_cloud_run_v2_service" "default" {
     service_account = google_service_account.main.email
   }
 }
-
 
 resource "google_eventarc_trigger" "instance_insert" {
   name     = "${var.name_prefix}-instance-insert"

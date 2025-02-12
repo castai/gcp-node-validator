@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/api/option"
 )
 
 type Config struct {
@@ -133,7 +135,7 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	valid := h.validateInstance(instance)
+	valid := h.validateInstance(ctx, instance)
 
 	if valid {
 		log.Info("instance is valid")
@@ -176,11 +178,15 @@ func (h *Handler) considerInstance(instance *computepb.Instance, log *logrus.Ent
 	return true
 }
 
-func (h *Handler) validateInstance(i *computepb.Instance) bool {
-	if err := h.validator.Validate(i); err != nil {
-		h.logger.WithError(err).Errorf("instance validation failed")
-		fmt.Println(err.Error())
-		return false
+func (h *Handler) validateInstance(ctx context.Context, i *computepb.Instance) bool {
+	if err := h.validator.Validate(ctx, i); err != nil {
+		valErr := &validate.ValidationError{}
+		if errors.As(err, &valErr) {
+			h.logger.WithError(err).WithField("unknownCommands", valErr.UnknownCommands).Errorf("instance validation failed")
+			return false
+		}
+
+		h.logger.WithError(err).Errorf("failed to validate instance, skipping instance")
 	}
 	return true
 }
@@ -249,6 +255,16 @@ func main() {
 		log.Fatalf("failed to create compute client: %v", err)
 	}
 
+	configureShWhitelistProvider, err := validate.NewInstanceTemplateWhitelistProvider(ctx, []option.ClientOption{})
+	if err != nil {
+		log.Fatalf("failed to create configure.sh validator: %v", err)
+	}
+
+	gcsWhitelistProvider, err := validate.NewCloudStorageWhitelistGetter("damian-vm-validator", []option.ClientOption{})
+	if err != nil {
+		log.Fatalf("failed to create GCS whitelist provider: %v", err)
+	}
+
 	handler := &Handler{
 		logger:        log,
 		computeClient: computeClient,
@@ -257,7 +273,7 @@ func main() {
 		clusterIDs:    cfg.ClusterIDs,
 		deleteInvalid: cfg.DeleteInvalid,
 
-		validator: validate.NewInstanceValidator(),
+		validator: validate.NewInstanceValidator(configureShWhitelistProvider, gcsWhitelistProvider),
 	}
 
 	http.HandleFunc("/", handler.handleAuditLog)
