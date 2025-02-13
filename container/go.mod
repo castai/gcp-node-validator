@@ -8,7 +8,6 @@ require (
 	cloud.google.com/go/compute v1.31.1
 	cloud.google.com/go/container v1.42.0
 	cloud.google.com/go/storage v1.50.0
-	github.com/cenkalti/backoff/v5 v5.0.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/samber/lo v1.49.1
 	github.com/sirupsen/logrus v1.9.3

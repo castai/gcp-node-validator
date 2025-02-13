@@ -41,14 +41,19 @@ resource "google_project_iam_custom_role" "instance_validator" {
   role_id     = "${var.name_prefix}CastInstanceValidator"
   title       = "CAST AI Instance Validator"
   description = "Custom role to validate CAST AI instances"
-  permissions = [
+  permissions = compact([
     "compute.instances.get",
-    "compute.instances.delete"
-  ]
+    "compute.instanceGroupManagers.get",
+    "compute.instanceTemplates.get",
+    "container.clusters.get",
+    "storage.objects.list",
+    "storage.objects.get",
+    var.delete_mode ? "compute.instances.delete" : null,
+  ])
 }
 
 # Grant permission to act on Compute Engine resources
-resource "google_project_iam_member" "compute_admin" {
+resource "google_project_iam_member" "instance_validator" {
   project = data.google_project.project.id
   role    = google_project_iam_custom_role.instance_validator.id
   member  = "serviceAccount:${google_service_account.main.email}"
@@ -67,6 +72,14 @@ resource "google_cloud_run_v2_service" "default" {
       env {
         name  = "APP_PROJECTID"
         value = data.google_project.project.project_id
+      }
+      env {
+        name  = "APP_WHITELISTBUCKET"
+        value = google_storage_bucket.main.name
+      }
+      env {
+        name  = "APP_DELETEINVALID"
+        value = tostring(var.delete_mode)
       }
     }
     service_account = google_service_account.main.email
@@ -102,6 +115,38 @@ resource "google_eventarc_trigger" "instance_insert" {
   }
 
   service_account = google_service_account.main.email
+}
+
+resource "google_logging_metric" "invalid_instances" {
+  name        = "${var.name_prefix}-invalid-instances"
+  description = "Count of instances that failed metadata script validation"
+  filter      = <<EOF
+resource.type = cloud_run_revision
+  AND resource.labels.service_name = ${google_cloud_run_v2_service.default.name}
+  AND "instance is invalid"
+EOF
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+}
+
+resource "google_logging_metric" "valid_instances" {
+  name        = "${var.name_prefix}-valid-instances"
+  description = "Count of instances that succeeded metadata script validation"
+  filter      = <<EOF
+resource.type = cloud_run_revision
+  AND resource.labels.service_name = ${google_cloud_run_v2_service.default.name}
+  AND "instance is valid"
+EOF
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
 }
 
 resource "google_monitoring_alert_policy" "invalid_instances" {

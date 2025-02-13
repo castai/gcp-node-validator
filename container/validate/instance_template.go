@@ -9,7 +9,6 @@ import (
 	"cloud.google.com/go/compute/apiv1/computepb"
 	container "cloud.google.com/go/container/apiv1"
 	"cloud.google.com/go/container/apiv1/containerpb"
-	"google.golang.org/api/option"
 )
 
 var (
@@ -24,26 +23,12 @@ type InstanceTemplateWhitelistProvider struct {
 	gcpInstanceTemplateClient      *compute.RegionInstanceTemplatesClient
 }
 
-func NewInstanceTemplateWhitelistProvider(ctx context.Context, gcpOptions []option.ClientOption) (*InstanceTemplateWhitelistProvider, error) {
-	cmc, err := container.NewClusterManagerRESTClient(ctx, gcpOptions...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cluster manager client: %w", err)
-	}
-
-	igmc, err := compute.NewInstanceGroupManagersRESTClient(ctx, gcpOptions...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create instance group managers client: %w", err)
-	}
-
-	instTemp, err := compute.NewRegionInstanceTemplatesRESTClient(ctx, gcpOptions...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create instance template client: %w", err)
-	}
+func NewInstanceTemplateWhitelistProvider(cmc *container.ClusterManagerClient, igmc *compute.InstanceGroupManagersClient, itc *compute.RegionInstanceTemplatesClient) (*InstanceTemplateWhitelistProvider, error) {
 
 	return &InstanceTemplateWhitelistProvider{
 		gcpClusterClient:               cmc,
 		gcpInstanceGroupManagersClient: igmc,
-		gcpInstanceTemplateClient:      instTemp,
+		gcpInstanceTemplateClient:      itc,
 	}, nil
 }
 

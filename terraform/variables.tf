@@ -28,3 +28,9 @@ variable "alert_severity" {
   type        = string
   default     = "WARNING"
 }
+
+variable "delete_mode" {
+  description = "Whether to delete invalid instances."
+  type        = bool
+  default     = false
+}

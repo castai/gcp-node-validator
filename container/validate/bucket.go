@@ -9,7 +9,6 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/api/iterator"
-	"google.golang.org/api/option"
 )
 
 type CloudStorageWhitelistGetter struct {
@@ -18,16 +17,12 @@ type CloudStorageWhitelistGetter struct {
 	gcpCloudStorageClient *storage.Client
 }
 
-func NewCloudStorageWhitelistGetter(bucketName string, options []option.ClientOption) (*CloudStorageWhitelistGetter, error) {
-	gcpCloudStorageClient, err := storage.NewClient(context.Background(), options...)
-	if err != nil {
-		return nil, err
-	}
+func NewCloudStorageWhitelistGetter(bucketName string, gcsc *storage.Client) (*CloudStorageWhitelistGetter, error) {
 
 	return &CloudStorageWhitelistGetter{
 		bucketName:            bucketName,
 		objectPrefix:          "",
-		gcpCloudStorageClient: gcpCloudStorageClient,
+		gcpCloudStorageClient: gcsc,
 	}, nil
 }
 

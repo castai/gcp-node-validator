@@ -9,15 +9,14 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
+	container "cloud.google.com/go/container/apiv1"
+	"cloud.google.com/go/storage"
 	"github.com/castai/gcp-node-validator/container/validate"
-	"github.com/cenkalti/backoff/v5"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/sirupsen/logrus"
-	"google.golang.org/api/option"
 )
 
 type Config struct {
@@ -26,7 +25,8 @@ type Config struct {
 	DeleteInvalid bool   `default:"false"`
 	Port          int    `default:"8080"`
 
-	ClusterIDs []string `required:"false"`
+	ClusterIDs      []string `required:"false"`
+	WhitelistBucket string   `required:"true"`
 }
 
 type Handler struct {
@@ -117,12 +117,14 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	instance, err := backoff.Retry(ctx, func() (*computepb.Instance, error) {
-		return h.computeClient.Get(ctx, instanceReq)
-	}, backoff.WithBackOff(backoff.NewConstantBackOff(4*time.Second)), backoff.WithMaxElapsedTime(60*time.Second))
+	instance, err := h.computeClient.Get(ctx, instanceReq)
 	if err != nil {
 		log.WithError(err).Errorf("failed to get instance")
-		http.Error(w, "Failed to get instance", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("OK")); err != nil {
+			log.WithError(err).Errorf("failed to write response")
+			return
+		}
 		return
 	}
 
@@ -143,7 +145,10 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		log.Info("instance is invalid")
 		if err := h.handleInvalidInstance(ctx, log, instanceReq.Project, instanceReq.Zone, instanceReq.Instance); err != nil {
 			log.WithError(err).Errorf("failed to handle invalid instance")
-			http.Error(w, "Failed to handle invalid instance", http.StatusInternalServerError)
+			if _, err := w.Write([]byte("OK")); err != nil {
+				log.WithError(err).Errorf("failed to write response")
+				return
+			}
 		}
 	}
 
@@ -254,15 +259,44 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create compute client: %v", err)
 	}
+	defer computeClient.Close()
 
-	configureShWhitelistProvider, err := validate.NewInstanceTemplateWhitelistProvider(ctx, []option.ClientOption{})
+	clusterManagerClient, err := container.NewClusterManagerRESTClient(ctx)
 	if err != nil {
-		log.Fatalf("failed to create configure.sh validator: %v", err)
+		log.Fatalf("failed to create cluster manager client: %v", err)
+	}
+	defer clusterManagerClient.Close()
+
+	instanceGroupManagersClient, err := compute.NewInstanceGroupManagersRESTClient(ctx)
+	if err != nil {
+		log.Fatalf("failed to create instance group managers client: %v", err)
+	}
+	defer instanceGroupManagersClient.Close()
+
+	instanceTemplateClient, err := compute.NewRegionInstanceTemplatesRESTClient(ctx)
+	if err != nil {
+		log.Fatalf("failed to create instance templates client: %v", err)
+	}
+	defer instanceTemplateClient.Close()
+
+	cloudStorageClient, err := storage.NewClient(context.Background())
+	if err != nil {
+		log.Fatalf("failed to create cloud storage client: %v", err)
+	}
+	defer cloudStorageClient.Close()
+
+	instanceTemplateWhitelistProvider, err := validate.NewInstanceTemplateWhitelistProvider(
+		clusterManagerClient,
+		instanceGroupManagersClient,
+		instanceTemplateClient,
+	)
+	if err != nil {
+		log.Fatalf("failed to create instance template whitelist provider: %v", err)
 	}
 
-	gcsWhitelistProvider, err := validate.NewCloudStorageWhitelistGetter("damian-vm-validator", []option.ClientOption{})
+	gcsWhitelistProvider, err := validate.NewCloudStorageWhitelistGetter(cfg.WhitelistBucket, cloudStorageClient)
 	if err != nil {
-		log.Fatalf("failed to create GCS whitelist provider: %v", err)
+		log.Fatalf("failed to create cloud storage whitelist provider: %v", err)
 	}
 
 	handler := &Handler{
@@ -273,7 +307,7 @@ func main() {
 		clusterIDs:    cfg.ClusterIDs,
 		deleteInvalid: cfg.DeleteInvalid,
 
-		validator: validate.NewInstanceValidator(configureShWhitelistProvider, gcsWhitelistProvider),
+		validator: validate.NewInstanceValidator(instanceTemplateWhitelistProvider, gcsWhitelistProvider),
 	}
 
 	http.HandleFunc("/", handler.handleAuditLog)
