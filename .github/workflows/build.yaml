@@ -53,11 +53,12 @@ jobs:
 
       - name: Build and push release
         uses: docker/build-push-action@v4
+        if: github.event_name == 'release'
         with:
           context: container
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
-          push: ${{ github.ref == 'refs/heads/main' }}
+          push: true
           tags: |
             ghcr.io/castai/node-validator:${{ env.RELEASE_TAG }}
