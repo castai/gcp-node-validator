@@ -40,7 +40,7 @@ var configureShPreprocessors = []scriptPreprocessor{
 	NewRegexReplacement(`CASTAI_CLUSTER_ID=".+"`, `CASTAI_CLUSTER_ID=****`),
 	NewRegexReplacement(`CASTAI_NODE_ID=".+"`, `CASTAI_NODE_ID=****`),
 	NewRegexReplacement(`-H "X-Api-Key: .+?"`, `-H "X-Api-Key: ****"`),
-	NewRegexReplacement(`https://api.cast.ai/v1/kubernetes/external-clusters/.+?/nodes/.+?/logs`, `https://api.cast.ai/v1/kubernetes/external-clusters/****/nodes/****/logs`),
+	NewRegexReplacement(`https://.+?/v1/kubernetes/external-clusters/.+?/nodes/.+?/logs`, `https://****/v1/kubernetes/external-clusters/****/nodes/****/logs`),
 }
 
 type ValidationError struct {
