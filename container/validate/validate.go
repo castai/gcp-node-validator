@@ -36,6 +36,7 @@ func (rr *RegexpReplacement) Apply(s string) string {
 }
 
 var configureShPreprocessors = []scriptPreprocessor{
+	NewRegexReplacement(`CASTAI_API_URL=".+"`, `CASTAI_API_URL=****`),
 	NewRegexReplacement(`CASTAI_API_KEY=".+"`, `CASTAI_API_KEY=****`),
 	NewRegexReplacement(`CASTAI_CLUSTER_ID=".+"`, `CASTAI_CLUSTER_ID=****`),
 	NewRegexReplacement(`CASTAI_NODE_ID=".+"`, `CASTAI_NODE_ID=****`),
