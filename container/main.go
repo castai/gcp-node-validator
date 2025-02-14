@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	container "cloud.google.com/go/container/apiv1"
@@ -11,7 +12,7 @@ import (
 	"github.com/castai/gcp-node-validator/container/api"
 	"github.com/castai/gcp-node-validator/container/validate"
 	"github.com/kelseyhightower/envconfig"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 type Config struct {
@@ -21,12 +22,16 @@ type Config struct {
 	Port          int    `default:"8080"`
 
 	ClusterIDs      []string `required:"false"`
-	WhitelistBucket string   `required:"true"`
+	WhitelistBucket WhitelistBucketConfig
+}
+
+type WhitelistBucketConfig struct {
+	Name string `required:"true"`
+	TTL  int    `default:"3600"`
 }
 
 func main() {
 	ctx := context.Background()
-	log := logrus.New()
 
 	cfg := &Config{}
 
@@ -34,10 +39,10 @@ func main() {
 		log.WithError(err).Fatal("failed to process config")
 	}
 
-	logLevel, err := logrus.ParseLevel(cfg.LogLevel)
+	logLevel, err := log.ParseLevel(cfg.LogLevel)
 	if err != nil {
 		log.Warnf("invalid log level %s, defaulting to info", cfg.LogLevel)
-		logLevel = logrus.InfoLevel
+		logLevel = log.InfoLevel
 	}
 	log.SetLevel(logLevel)
 
@@ -80,7 +85,7 @@ func main() {
 		log.Fatalf("failed to create instance template whitelist provider: %v", err)
 	}
 
-	gcsWhitelistProvider, err := validate.NewCloudStorageWhitelistGetter(cfg.WhitelistBucket, cloudStorageClient)
+	gcsWhitelistProvider, err := validate.NewCloudStorageWhitelistGetter(cfg.WhitelistBucket.Name, cloudStorageClient, time.Duration(cfg.WhitelistBucket.TTL)*time.Second)
 	if err != nil {
 		log.Fatalf("failed to create cloud storage whitelist provider: %v", err)
 	}

@@ -9,6 +9,7 @@ require (
 	cloud.google.com/go/container v1.42.0
 	cloud.google.com/go/storage v1.50.0
 	github.com/kelseyhightower/envconfig v1.4.0
+	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/samber/lo v1.49.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.10.0

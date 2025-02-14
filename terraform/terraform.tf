@@ -1,4 +1,3 @@
-
 terraform {
   required_providers {
   }
@@ -66,6 +65,8 @@ resource "google_cloud_run_v2_service" "default" {
 
   deletion_protection = false
 
+  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+
   template {
     containers {
       image = var.validator_image
@@ -74,7 +75,7 @@ resource "google_cloud_run_v2_service" "default" {
         value = data.google_project.project.project_id
       }
       env {
-        name  = "APP_WHITELISTBUCKET"
+        name  = "APP_WHITELISTBUCKET_NAME"
         value = google_storage_bucket.main.name
       }
       env {

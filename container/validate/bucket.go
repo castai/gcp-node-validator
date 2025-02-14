@@ -2,11 +2,14 @@ package validate
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
+	"time"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"cloud.google.com/go/storage"
+	"github.com/patrickmn/go-cache"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/api/iterator"
 )
@@ -15,14 +18,18 @@ type CloudStorageWhitelistGetter struct {
 	bucketName            string
 	objectPrefix          string
 	gcpCloudStorageClient *storage.Client
+
+	objCache *cache.Cache
 }
 
-func NewCloudStorageWhitelistGetter(bucketName string, gcsc *storage.Client) (*CloudStorageWhitelistGetter, error) {
+func NewCloudStorageWhitelistGetter(bucketName string, gcsc *storage.Client, objCacheTTL time.Duration) (*CloudStorageWhitelistGetter, error) {
+	c := cache.New(objCacheTTL, 2*objCacheTTL)
 
 	return &CloudStorageWhitelistGetter{
 		bucketName:            bucketName,
 		objectPrefix:          "",
 		gcpCloudStorageClient: gcsc,
+		objCache:              c,
 	}, nil
 }
 
@@ -43,11 +50,25 @@ func (c *CloudStorageWhitelistGetter) GetWhitelist(ctx context.Context, i *compu
 			return nil, fmt.Errorf("failed to get object: %v", err)
 		}
 
+		log := logrus.WithField("objectName", attrs.Name)
+
+		cacheKey := fmt.Sprintf("%s:%s", attrs.Name, base64.StdEncoding.EncodeToString(attrs.MD5))
+		cachedObj, found := c.objCache.Get(cacheKey)
+		if found {
+			cachedObjData, ok := cachedObj.([]byte)
+			if ok {
+				log.Debug("using cached object")
+				whitelist = append(whitelist, string(cachedObjData))
+				continue
+			}
+		}
+
+		if attrs.Size == 0 {
+			continue
+		}
+
 		if attrs.Size > 1024*1024 {
-			logrus.WithFields(logrus.Fields{
-				"object": attrs.Name,
-				"size":   attrs.Size,
-			}).Infof("skipping object because it is too large")
+			log.WithField("size", attrs.Size).Infof("skipping object because it is too large")
 			continue
 		}
 
@@ -61,6 +82,8 @@ func (c *CloudStorageWhitelistGetter) GetWhitelist(ctx context.Context, i *compu
 		if err != nil {
 			return nil, fmt.Errorf("failed to read object: %v", err)
 		}
+
+		c.objCache.Set(cacheKey, data, cache.DefaultExpiration)
 
 		whitelist = append(whitelist, string(data))
 	}
