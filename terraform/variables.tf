@@ -30,7 +30,7 @@ variable "alert_severity" {
 }
 
 variable "delete_mode" {
-  description = "Whether to delete invalid instances."
+  description = "Whether to delete invalid instances"
   type        = bool
   default     = false
 }
