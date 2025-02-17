@@ -36,6 +36,12 @@ resource "google_project_iam_member" "runinvoker" {
   member  = "serviceAccount:${google_service_account.main.email}"
 }
 
+resource "google_project_iam_member" "artifactregistry_reader" {
+  project = data.google_project.project.id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${google_service_account.main.email}"
+}
+
 resource "google_project_iam_custom_role" "instance_validator" {
   role_id     = "${var.name_prefix}CastInstanceValidator"
   title       = "CAST AI Instance Validator"

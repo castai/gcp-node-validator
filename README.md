@@ -14,6 +14,10 @@ The whitelisted scripts are taken from:
 
 ## Deployment
 
+The instance validator container image is available on GitHub Container Registry (ghcr.io).
+To use is in a CloudRun service, you need to create a remote Artifact Registry repository, which points to ghcr.io.
+Refer to [this document](https://cloud.google.com/artifact-registry/docs/repositories/remote-repo) to create a remote Artifact Registry repository.
+
 The application can be deployed using the Terraform module in the [`terraform`](./terraform/) directory.
 
 You can use this module in your Terraform configuration by adding the following module block:
@@ -22,8 +26,8 @@ You can use this module in your Terraform configuration by adding the following 
 module "validator" {
   source = "github.com/castai/gcp-node-validator/terraform"
 
-  name_prefix     = "my-validator"
-  validator_image = "ghcr.io/castai/node-validator:v0.1.0-8-gdc83ed3"
+  name_prefix     = "castai-validator"
+  validator_image = "<ghcr-remote-repository>/castai/node-validator:v0.1.2"
   project         = "<gcp-project>"
   region          = "<gcp-region>"
 }
