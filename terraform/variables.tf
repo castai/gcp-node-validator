@@ -14,6 +14,12 @@ variable "validator_image" {
   description = "The image to use for the validator Cloud Run service"
 }
 
+variable "cast_cluster_ids" {
+  description = "List of CAST cluster IDs, for which nodes should be validated. If empty, all CAST nodes are validated."
+  type        = list(string)
+  default     = []
+}
+
 variable "alert_notification_channels" {
   description = <<EOF
 The notification channels to send alerts for invalid instances.

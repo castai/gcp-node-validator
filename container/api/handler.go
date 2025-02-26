@@ -13,7 +13,13 @@ import (
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/castai/gcp-node-validator/container/validate"
+	"github.com/samber/lo"
 	"github.com/sirupsen/logrus"
+)
+
+const (
+	castClusterIDLabel = "cast-cluster-id"
+	clusterNameLabel   = "goog-k8s-cluster-name"
 )
 
 type AuditLog struct {
@@ -164,7 +170,7 @@ func (h *Handler) considerInstance(instance *computepb.Instance, log *logrus.Ent
 	}
 
 	if len(h.clusterIDs) > 0 {
-		clusterID, found := instance.Labels["cast-cluster-id"]
+		clusterID, found := instance.Labels[castClusterIDLabel]
 
 		if !found {
 			log.Info("missing CAST cluster id, skip instance")
@@ -183,13 +189,20 @@ func (h *Handler) considerInstance(instance *computepb.Instance, log *logrus.Ent
 
 func (h *Handler) validateInstance(ctx context.Context, i *computepb.Instance) bool {
 	if err := h.validator.Validate(ctx, i); err != nil {
+		log := h.logger.WithError(err).WithFields(logrus.Fields{
+			"instanceName":     lo.FromPtr(i.Name),
+			"instanceSelfLink": lo.FromPtr(i.SelfLink),
+			"clusterName":      i.Labels[clusterNameLabel],
+			"castClusterID":    i.Labels[castClusterIDLabel],
+		})
+
 		valErr := &validate.ValidationError{}
 		if errors.As(err, &valErr) {
-			h.logger.WithError(err).WithField("unknownCommands", valErr.UnknownCommands).Errorf("instance validation failed")
+			log.WithField("unknownCommands", valErr.UnknownCommands).Errorf("instance validation failed")
 			return false
 		}
 
-		h.logger.WithError(err).Errorf("failed to validate instance, skipping instance")
+		log.WithError(err).Errorf("failed to validate instance, skipping instance")
 	}
 	return true
 }

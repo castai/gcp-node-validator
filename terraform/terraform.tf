@@ -88,6 +88,10 @@ resource "google_cloud_run_v2_service" "default" {
         name  = "APP_DELETEINVALID"
         value = tostring(var.delete_mode)
       }
+      env {
+        name  = "APP_CLUSTERIDS"
+        value = join(",", var.cast_cluster_ids)
+      }
     }
     service_account = google_service_account.main.email
   }
